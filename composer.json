@@ -1,30 +1,68 @@
 {
-    "name": "swolley/shop",
-    "description": "",
-    "authors": [
-        {
-            "name": "Swolley",
-            "email": "myentity@inwind.it"
-        }
-    ],
-    "extra": {
-        "laravel": {
-            "providers": [],
-            "aliases": {
-
-            }
-        }
-    },
-    "autoload": {
-        "psr-4": {
-            "Modules\\Shop\\": "app/",
-            "Modules\\Shop\\Database\\Factories\\": "database/factories/",
-            "Modules\\Shop\\Database\\Seeders\\": "database/seeders/"
-        }
-    },
-    "autoload-dev": {
-        "psr-4": {
-            "Modules\\Shop\\Tests\\": "tests/"
-        }
+  "name": "swolley/laraplate-shop",
+  "vendor": "swolley",
+  "description": "Shop module for Laraplate: online sales channel orchestrating CMS content, ERP items and SAO support.",
+  "version": "v0.1.0",
+  "keywords": [
+    "laravel",
+    "laraplate",
+    "shop",
+    "ecommerce",
+    "storefront"
+  ],
+  "authors": [
+    {
+      "name": "Swolley",
+      "email": "myentity@inwind.it"
     }
+  ],
+  "license": "AGPL-3.0-or-later",
+  "type": "laravel-module",
+  "repositories": [
+    {
+      "type": "vcs",
+      "url": "https://github.com/swolley/license-compliance-checker.git",
+      "no-api": true
+    }
+  ],
+  "require": {
+    "php": ">=8.5",
+    "laravel/framework": "^12.0"
+  },
+  "scripts": {
+    "update:requirements": [
+      "composer bump",
+      "npx npm-check-updates -u"
+    ]
+  },
+  "extra": {
+    "laravel": {
+      "providers": [],
+      "aliases": {}
+    }
+  },
+  "autoload": {
+    "psr-4": {
+      "Modules\\Shop\\": "app/",
+      "Modules\\Shop\\Database\\Factories\\": "database/factories/",
+      "Modules\\Shop\\Database\\Seeders\\": "database/seeders/"
+    }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "Modules\\Shop\\Tests\\Unit\\": "tests/Unit",
+      "Modules\\Shop\\Tests\\Feature\\": "tests/Feature",
+      "Modules\\Shop\\Tests\\Integration\\": "tests/Integration",
+      "Modules\\Shop\\Tests\\Support\\": "tests/Support/"
+    },
+    "classmap": [
+      "tests/TestCase.php"
+    ]
+  },
+  "config": {
+    "allow-plugins": {
+      "pestphp/pest-plugin": true,
+      "dealerdirect/phpcodesniffer-composer-installer": true
+    }
+  }
 }

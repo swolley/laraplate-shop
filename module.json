@@ -1,11 +1,25 @@
 {
     "name": "Shop",
+    "laraplate_owned": true,
     "alias": "shop",
-    "description": "",
-    "keywords": [],
-    "priority": 0,
+    "description": "Shop module — online sales channel orchestrating CMS content, ERP items and SAO support.",
+    "color": "magenta",
+    "keywords": [
+        "shop",
+        "ecommerce",
+        "storefront",
+        "laraplate"
+    ],
+    "priority": 99,
     "providers": [
         "Modules\\Shop\\Providers\\ShopServiceProvider"
     ],
-    "files": []
+    "aliases": {},
+    "files": [],
+    "requires": [
+        "Core",
+        "CMS",
+        "ERP",
+        "SAO"
+    ]
 }
