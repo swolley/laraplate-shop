@@ -4,45 +4,24 @@ declare(strict_types=1);
 
 namespace Modules\Shop\Providers;
 
-use Illuminate\Console\Scheduling\Schedule;
-use Nwidart\Modules\Support\ModuleServiceProvider;
+use Modules\Core\Overrides\ModuleServiceProvider;
+use Override;
 
-class ShopServiceProvider extends ModuleServiceProvider
+final class ShopServiceProvider extends ModuleServiceProvider
 {
-    /**
-     * The name of the module.
-     */
+    #[Override]
     protected string $name = 'Shop';
 
-    /**
-     * The lowercase version of the module name.
-     */
+    #[Override]
     protected string $nameLower = 'shop';
-
-    /**
-     * Command classes to register.
-     *
-     * @var string[]
-     */
-    // protected array $commands = [];
 
     /**
      * Provider classes to register.
      *
-     * @var string[]
+     * @var array<int, class-string>
      */
     protected array $providers = [
         EventServiceProvider::class,
         RouteServiceProvider::class,
     ];
-
-    /**
-     * Define module schedules.
-     *
-     * @param  $schedule
-     */
-    // protected function configureSchedules(Schedule $schedule): void
-    // {
-    //     $schedule->command('inspire')->hourly();
-    // }
 }
