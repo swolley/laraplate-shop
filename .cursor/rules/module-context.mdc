@@ -1,0 +1,18 @@
+---
+alwaysApply: false
+---
+
+# Shop module context (caveman)
+
+- Path: Modules/Shop only.
+- Root rules = base law. Always follow.
+- This file = extra Shop law.
+
+- Shop need Core, CMS, ERP, SAO. Missing one, Shop no run.
+- Shop orchestrate. Items and orders live in ERP, content in CMS, support in SAO. Do not clone their logic.
+- Dependency one-way: Shop know others, others know nothing of Shop.
+- Tables prefixed `shop_`.
+- Module still scaffold. Domain design not decided yet.
+
+- Core change impact big. CMS/ERP/SAO change impact medium. Be careful.
+- If requirement unclear or risky: stop and ask user.
