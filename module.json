@@ -10,7 +10,7 @@
         "storefront",
         "laraplate"
     ],
-    "priority": 99,
+    "priority": 20,
     "providers": [
         "Modules\\Shop\\Providers\\ShopServiceProvider"
     ],
