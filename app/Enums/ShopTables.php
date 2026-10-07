@@ -14,6 +14,6 @@ enum ShopTables: string
     case Products = 'shop_products';
     case ProductVariants = 'shop_product_variants';
 
-    // pivots
+    // composition of a variant from ERP items
     case VariantItems = 'shop_variant_items';
 }

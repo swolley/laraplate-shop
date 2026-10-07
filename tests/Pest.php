@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Modules\Core\Services\DynamicContentsService;
+use Modules\Shop\Casts\EntityType;
 use Modules\Shop\Database\Seeders\ShopDatabaseSeeder;
+use Modules\Shop\Models\Entity;
+use Modules\Shop\Models\Pivot\Presettable;
 use Modules\Shop\Tests\TestCase;
 
 pest()->extend(TestCase::class)
@@ -39,6 +42,16 @@ function setupShopEntities(): void
     DynamicContentsService::reset();
 
     resolve(ShopDatabaseSeeder::class)->run();
+}
 
-    DynamicContentsService::getInstance()->clearAllCaches();
+/**
+ * The active version of the product entity's default preset: the presettable a product `Content`
+ * is created against. Scoped to the product entity because presettables are not partitioned by
+ * module.
+ */
+function shopProductPresettable(): Presettable
+{
+    return Presettable::query()
+        ->where('entity_id', Entity::query()->where('type', EntityType::Products)->sole()->id)
+        ->sole();
 }
