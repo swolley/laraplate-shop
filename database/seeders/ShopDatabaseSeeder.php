@@ -66,7 +66,7 @@ final class ShopDatabaseSeeder extends Seeder
             /** @var Preset $preset */
             $preset = $this->create(Preset::class, ['name' => self::DEFAULT_PRESET, 'entity_id' => $entity->id]);
 
-            $preset->fields()->attach($this->bodyField()->id, ['preset_id' => $preset->id, 'is_required' => true, 'default' => null]);
+            $preset->fields()->attach($this->bodyField()->getKey(), ['preset_id' => $preset->id, 'is_required' => true, 'default' => null]);
 
             // The snapshot is frozen after the fields are attached: BelongsToMany bulk operations
             // do not fire the pivot events that would otherwise version the preset.
@@ -76,10 +76,9 @@ final class ShopDatabaseSeeder extends Seeder
         });
     }
 
-    private function bodyField(): Field
+    private function bodyField(): Model
     {
-        /** @var Field $field */
-        return (new Field)->newQuery()->withoutGlobalScopes()->where('name', self::BODY_FIELD)->first()
+        return (new Field)->newQuery()->withoutGlobalScopes()->get()->keyBy('name')->get(self::BODY_FIELD)
             ?? $this->create(Field::class, ['name' => self::BODY_FIELD, 'type' => FieldType::Editor, 'options' => (object) [], 'is_translatable' => true]);
     }
 }
