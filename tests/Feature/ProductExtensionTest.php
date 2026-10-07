@@ -2,7 +2,8 @@
 
 declare(strict_types=1);
 
-use Illuminate\Database\QueryException;
+use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Modules\CMS\Models\Content;
 use Modules\CMS\Services\ContentExtensionResolver;
@@ -31,7 +32,7 @@ it('a product listing upcasts in a constant number of queries', function (): voi
     // the upcast, so the pipeline's own cost is two queries — one for the content page, one batched
     // query for all extenders — no matter how many rows the page holds (C5/C6, spec "two queries per
     // entity-scoped page").
-    $fetchPage = static fn (): Illuminate\Support\Collection => Content::withExtended()
+    $fetchPage = static fn (): Collection => Content::withExtended()
         ->withoutGlobalScope(LocaleScope::class)
         ->without('presettable', 'translation')
         ->get();
@@ -75,7 +76,7 @@ it('a content cannot be extended by two products', function (): void {
         'kind' => ProductKind::Physical->value,
     ]);
     $second->save();
-})->throws(QueryException::class);
+})->throws(UniqueConstraintViolationException::class);
 
 it('deleting a product deletes its content and vice versa', function (): void {
     // Extender -> content: soft-deleting the product cascades to its content (C9/E17).
@@ -113,4 +114,23 @@ it('product reads and writes merged content fields', function (): void {
     expect($fresh->valid_to)->not->toBeNull()
         ->and($fresh->valid_to->toDateString())->toBe($date->toDateString())
         ->and($fresh->content->valid_to->toDateString())->toBe($date->toDateString());
+});
+
+it('persists a translatable content field written through the product root', function (): void {
+    $product = Product::factory()->create();
+
+    // `title` is a translatable field: it buffers in the content's pending translations and never
+    // makes the Content dirty, so the write-through must still flush it on save (E2a).
+    $title = 'Merged Product Title ' . uniqid();
+    $product->title = $title;
+
+    // Read-through on the same instance before saving.
+    expect($product->title)->toBe($title);
+
+    $product->save();
+
+    $fresh = Product::query()->findOrFail($product->getKey());
+
+    expect($fresh->title)->toBe($title)
+        ->and($fresh->content->title)->toBe($title);
 });

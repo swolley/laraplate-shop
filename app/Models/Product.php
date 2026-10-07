@@ -83,6 +83,14 @@ final class Product extends Model implements ExtendsContent
         'metadata',
     ];
 
+    /**
+     * Raised by {@see self::setAttribute()} whenever a content-owned key is written through the product
+     * root, so the saving hook flushes the merged {@see Content} even when the write left no dirty
+     * column — translatable fields (`title`, `slug`, translatable dynamic fields) buffer in the
+     * content's pending translations and never make it dirty.
+     */
+    private bool $contentDirtyViaMerge = false;
+
     #[Override]
     public function contentAlias(): string
     {
@@ -159,6 +167,7 @@ final class Product extends Model implements ExtendsContent
 
         if ($content instanceof Content) {
             $content->setAttribute($key, $value);
+            $this->contentDirtyViaMerge = true;
 
             return $this;
         }
@@ -198,21 +207,32 @@ final class Product extends Model implements ExtendsContent
     /**
      * Persist a merged content whose fields changed through the product root before the product is
      * written (E2a). The seam trait's own `save()` already stages and persists a not-yet-linked
-     * content on the first save, so this only covers the later write-through path — mirroring how
-     * `Contributor` persists its dirty `User`.
+     * content on the first save (flushing its pending translations through the content's own `saved`
+     * event), so this only covers the later write-through path — mirroring how `Contributor` persists
+     * its dirty `User`. A plain-column write makes the content dirty; a translatable write does not,
+     * so {@see self::$contentDirtyViaMerge} carries that intent. The content is saved only when it
+     * actually changed, never unconditionally, so a product save never spawns a spurious content
+     * version or approval record.
      */
+    #[Override]
     protected static function booted(): void
     {
         self::saving(static function (self $product): void {
+            // The first save is the trait's job (the relation is not loaded yet and tempContent was
+            // already cleared); drop the staging flag here without re-saving the content.
             if ($product->tempContent !== null || ! $product->relationLoaded('content')) {
+                $product->contentDirtyViaMerge = false;
+
                 return;
             }
 
             $content = $product->getRelation('content');
 
-            if ($content instanceof Content && $content->isDirty()) {
+            if ($content instanceof Content && ($content->isDirty() || $product->contentDirtyViaMerge)) {
                 $content->save();
             }
+
+            $product->contentDirtyViaMerge = false;
         });
     }
 
@@ -224,6 +244,7 @@ final class Product extends Model implements ExtendsContent
     /**
      * @return array<string, string>
      */
+    #[Override]
     protected function casts(): array
     {
         return [
