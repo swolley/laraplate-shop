@@ -5,8 +5,11 @@ declare(strict_types=1);
 namespace Modules\Shop\Models;
 
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Validation\Rule;
 use Modules\Core\Overrides\Model;
+use Modules\ERP\Models\Item;
 use Modules\Shop\Database\Factories\ProductVariantFactory;
 use Modules\Shop\Enums\ShopTables;
 use Override;
@@ -55,6 +58,31 @@ final class ProductVariant extends Model
     public function product(): BelongsTo
     {
         return $this->belongsTo(Product::class);
+    }
+
+    /**
+     * The composition rows of this variant (E7b): one is a simple product, several are a bundle, none is
+     * an item-less variant.
+     *
+     * @return HasMany<VariantItem, $this>
+     */
+    public function items(): HasMany
+    {
+        return $this->hasMany(VariantItem::class, 'variant_id');
+    }
+
+    /**
+     * The ERP items this variant is composed of, through the composition rows. A soft-deleted row is left
+     * out, exactly as it is from {@see self::items()}; use that relation to write rows.
+     *
+     * @return BelongsToMany<Item, $this>
+     */
+    public function erpItems(): BelongsToMany
+    {
+        return $this->belongsToMany(Item::class, ShopTables::VariantItems->value, 'variant_id', 'item_id')
+            ->withPivot('quantity', 'role')
+            ->withTimestamps()
+            ->wherePivotNull('deleted_at');
     }
 
     /**
