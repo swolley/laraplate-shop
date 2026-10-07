@@ -6,6 +6,7 @@ namespace Modules\Shop\Models;
 
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Validation\Rule;
 use Modules\CMS\Contracts\ExtendsContent;
 use Modules\CMS\Enums\CMSTables;
 use Modules\CMS\Models\Concerns\ExtendsContentTrait;
@@ -206,7 +207,7 @@ final class Product extends Model implements ExtendsContent
     {
         $rules = parent::getRules();
         $rules['create'] = array_merge($rules['create'], [
-            'content_id' => ['required', 'integer', 'exists:' . CMSTables::Contents->value . ',id'],
+            'content_id' => ['required', 'integer', Rule::exists(CMSTables::Contents->value, 'id')->whereNull('deleted_at')],
             'kind' => ['required', 'string', ProductKind::validationRule()],
             'is_published_in_shop' => ['sometimes', 'boolean'],
             'featured' => ['sometimes', 'boolean'],
@@ -214,7 +215,7 @@ final class Product extends Model implements ExtendsContent
             'metadata' => ['nullable', 'array'],
         ]);
         $rules['update'] = array_merge($rules['update'], [
-            'content_id' => ['sometimes', 'integer', 'exists:' . CMSTables::Contents->value . ',id'],
+            'content_id' => ['sometimes', 'integer', Rule::exists(CMSTables::Contents->value, 'id')->whereNull('deleted_at')],
             'kind' => ['sometimes', 'string', ProductKind::validationRule()],
             'is_published_in_shop' => ['sometimes', 'boolean'],
             'featured' => ['sometimes', 'boolean'],
@@ -257,6 +258,7 @@ final class Product extends Model implements ExtendsContent
         });
     }
 
+    #[Override]
     protected static function newFactory(): ProductFactory
     {
         return ProductFactory::new();

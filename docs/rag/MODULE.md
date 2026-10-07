@@ -96,7 +96,7 @@ Columns:
 
 Index `shop_products_company_published_IDX` on `(company_id, is_published_in_shop)`.
 Validation lives in `getRules()` (`kind` required on create and bounded to
-`ProductKind`, `content_id` must exist in `contents`).
+`ProductKind`, `content_id` must exist in `contents` and not be soft-deleted).
 
 ### Seam registration
 
@@ -168,6 +168,14 @@ the way CMS `Contributor` surfaces its `User`.
   save the content, so it never spawns a spurious content version or approval.
 - The first save is the seam trait's job (it stages and persists the temp
   content); the hook only clears the flag in that case.
+- **The body field `content` is the one key the merge does not cover.** The
+  product's single seeded dynamic field is named `content` (it reuses the CMS Editor
+  `content` field), but on `Product` `content` is also the relation method from
+  `ExtendsContentTrait`, so `isNativeKey('content')` is true. `$product->content`
+  therefore always returns the `Content` model, never the body value. Read and write
+  the body through the merged content: `$product->content->content`. A future write
+  surface (plan #2) must special-case the `content` key, or expose a dedicated
+  `body` accessor/mutator that delegates to the merged `Content`.
 
 ### Lifecycle
 
@@ -182,7 +190,15 @@ Product and content are one unit with a symmetric lifecycle (E17):
   cascades on delete.
 - Shop code does not cascade a product soft delete to its variants. Variants of a
   trashed product are rejected on create (see below); a hard delete cascades at
-  the FK level.
+  the FK level (product to variants to variant items).
+- **Soft-deleting a product leaves its variants live and orphaned.**
+  `$product->delete()` trashes the content with it (E17) but does not touch the
+  `ProductVariant` rows: only a hard delete cascades, through the FK. A
+  soft-deleted product's variants therefore stay live and queryable, while
+  `$variant->product` resolves to null (the parent's soft-delete scope), so the
+  tenant derived from the product (E23) cannot be resolved for them. Any later
+  availability, cart or checkout query MUST constrain on a non-trashed product,
+  unless a later plan adds a soft-delete cascade from product to variants.
 
 ### Search
 
@@ -280,7 +296,9 @@ ERP `Item`s (E7b).
 ## Developer caveats
 
 - **Content keys are not fillable.** A product's content-owned fields route only
-  through direct property assignment (`$product->title = '...'`) and `forceFill`.
+  through direct property assignment (`$product->title = '...'`) and `forceFill`
+  (the one exception is the body field `content`, see «Transparent content merge»:
+  write it as `$product->content->content`).
   They do not route through `create([...])` / `update([...])` arrays, because those
   keys are not in `$fillable` and `fill()` does not know about the merge. Core
   sets `Model::preventSilentlyDiscardingAttributes(! isProduction())`

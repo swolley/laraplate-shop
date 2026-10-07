@@ -231,3 +231,30 @@ it('removes the composition rows with a hard-deleted variant', function (): void
         ->and(VariantItem::withTrashed()->whereKey($other_row->getKey())->exists())->toBeTrue()
         ->and(Item::withTrashed()->whereKey($kept_item->getKey())->exists())->toBeTrue();
 });
+
+it('reaps the whole catalog subtree when a product is hard-deleted', function (): void {
+    $product = Product::factory()->create(['kind' => ProductKind::Physical]);
+    $variant = ProductVariant::factory()->default()->for($product)->create();
+    $second_variant = ProductVariant::factory()->for($product)->create();
+    $item = Item::factory()->create();
+    VariantItem::factory()->main()->for($variant, 'variant')->for($item, 'item')->create();
+    $trashed_row = VariantItem::factory()->component()->for($second_variant, 'variant')->create();
+    $trashed_row->delete();
+
+    $other_variant = ProductVariant::factory()->create();
+    $other_row = VariantItem::factory()->main()->for($other_variant, 'variant')->create();
+
+    $variant_ids = [$variant->getKey(), $second_variant->getKey()];
+
+    expect(VariantItem::withTrashed()->whereIn('variant_id', $variant_ids)->count())->toBe(2);
+
+    $product->forceDelete();
+
+    expect(Product::withTrashed()->whereKey($product->getKey())->exists())->toBeFalse()
+        ->and(ProductVariant::withTrashed()->whereIn('id', $variant_ids)->exists())->toBeFalse()
+        ->and(VariantItem::withTrashed()->whereIn('variant_id', $variant_ids)->exists())->toBeFalse()
+        // The referenced ERP item is untouched, and so is another product's subtree.
+        ->and(Item::withTrashed()->whereKey($item->getKey())->exists())->toBeTrue()
+        ->and(ProductVariant::withTrashed()->whereKey($other_variant->getKey())->exists())->toBeTrue()
+        ->and(VariantItem::withTrashed()->whereKey($other_row->getKey())->exists())->toBeTrue();
+});
