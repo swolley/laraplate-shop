@@ -8,9 +8,14 @@ support into a storefront.
 Catalog foundation only. The module ships the product catalog core (product,
 variant, variant composition) and the seed of the product content entity. It has
 no stock, cart, checkout or payment behaviour, and no write, API or Filament
-surface yet (see «Not in this module yet»). It is enabled in
-`modules_statuses.json`. `routes/web.php` and `routes/api.php` still mount the
-scaffold `ShopController` stub.
+surface yet (see «Not in this module yet»).
+
+The module is **not enabled** in the committed `modules_statuses.json`.
+Enablement is pending a small CMS test fix: enabling Shop registers `shop.product`
+as the first production content extender, and two CMS tests assume an empty
+extender registry. To use the module, add `"Shop": true` to
+`modules_statuses.json` locally. Until it is enabled, none of its routes,
+providers or migrations load.
 
 ## Boundaries
 
@@ -83,7 +88,7 @@ Columns:
 |--------|-------|
 | `company_id` | Tenant, through ERP `BelongsToCompany` (E23): company global scope, `creating` auto-fill from the current company, `company_id` added to `$fillable` |
 | `content_id` | NOT NULL and UNIQUE (E16): one extender per content, a product always has a body. FK to CMS `contents`, `cascadeOnDelete` |
-| `kind` | `ProductKind`, default `physical` |
+| `kind` | `ProductKind`. `physical` is the column default only: the model does not apply it in memory (`(new Product)->kind` is null) and `getRules()` requires `kind` on create |
 | `is_published_in_shop` | boolean, default false |
 | `featured` | boolean, default false |
 | `release_date` | nullable date |
@@ -108,9 +113,17 @@ Consequences of the seam to keep in mind:
   through `Product`, or use `Content::withExtended()` to reach the contents.
 - `Product::query()` always eager-loads `content` (`$with`). Upcasting a page of
   extended contents with the CMS `ContentExtensionResolver` costs a constant
-  number of queries (one for the page, one batched query for the extenders), not
-  one per row.
-- `$product->content` always resolves, even though the hide scope is on.
+  number of queries per distinct alias (one for the page, one batched query for the
+  extenders), not one per row. That holds for a lean page: the test strips the
+  `presettable` and `translation` eager-loads `Content` carries in `$with`. The
+  resolver queries `Product` through its company global scope while `Content` is
+  not company-scoped, so once a company context is active, upcasting a product
+  content of another company throws (it finds no extender row). This is a tracked
+  follow-up.
+- `$product->content` resolves despite the hide scope: `content()` removes only
+  `HidesExtendedContent`, not the soft-delete scope. Once the product is
+  soft-deleted its content is trashed with it (E17), so `content` is null and the
+  merged reads (E2a) return null.
 
 ### Creating a product
 
@@ -141,8 +154,9 @@ the way CMS `Contributor` surfaces its `User`.
 
 - `getAttribute()` / `setAttribute()` route any key outside the `OWN_COLUMNS`
   whitelist (the product's own columns, timestamps, `deleted_at`, `is_deleted`) to
-  the merged `Content`. A key that is an accessor, a mutator, a relation or a
-  method of the product stays native.
+  the merged `Content`. A key also stays native when it is `pivot`, is already
+  present in the product's attribute bag, or is an accessor, a mutator, a relation
+  or a method of the product.
 - The merged content is the loaded `content` relation, or the content staged by
   `setTempContent()` for a first save. The merge never triggers a lazy load, so
   attribute access on an unretrieved product stays query-free.
@@ -174,7 +188,7 @@ Product and content are one unit with a symmetric lifecycle (E17):
 
 The seam merges `Product::searchableExtension()` into the content's search
 document under the nested `extension` object (`kind`, `is_published_in_shop`,
-`featured`), and `searchableExtensionMapping()` contributes the typed mapping
+`featured`; CMS adds a `type` key holding the `shop.product` alias), and `searchableExtensionMapping()` contributes the typed mapping
 (keyword and boolean filters). The trait re-sends the content to the index after
 every product save, so the document never lags behind the extension.
 
@@ -226,7 +240,10 @@ ERP `Item`s (E7b).
 - **Uniqueness** of `(variant_id, item_id)` among **live** rows is enforced by
   validation (a unique rule scoped to the variant and `deleted_at IS NULL`), not
   by a database index, so a soft-deleted row does not block re-adding the item.
-  Swapping the item of a row re-applies the rule only when the item changes.
+  The rule runs on create and on an item swap (only when the item changes). It is
+  **not** enforced on a restore: Core skips update validation when `deleted_at` is
+  dirty, so restoring a soft-deleted row after the same item was re-added creates
+  a duplicate live pair. This is a known gap, tracked as a minor.
 - A row never moves to another variant. `item_id` must exist and be live (not
   soft-deleted) when a row is created or its item is swapped. `variant_id` must
   exist and not be trashed.
@@ -265,13 +282,18 @@ ERP `Item`s (E7b).
 - **Content keys are not fillable.** A product's content-owned fields route only
   through direct property assignment (`$product->title = '...'`) and `forceFill`.
   They do not route through `create([...])` / `update([...])` arrays, because those
-  keys are not in `$fillable` and `fill()` does not know about the merge. A future
-  write surface must wire content-key routing in `fill()` first.
-- **Entity and preset are not resolved from the content.** A CMS `Content`
-  extended by a `Product` resolves its presettable, entity and preset through CMS
-  classes, not Shop's. A product-specific accessor for the Shop entity and preset
-  comes with the storefront plan. Until then reach them through
-  `Shop\Models\Entity` / `Preset` or `DynamicContentsService`.
+  keys are not in `$fillable` and `fill()` does not know about the merge. Core
+  sets `Model::preventSilentlyDiscardingAttributes(! isProduction())`
+  (`CoreServiceProvider`), so passing a content key in such an array **throws**
+  `MassAssignmentException` outside production and is **silently discarded** in
+  production. A future write surface must wire content-key routing in `fill()`
+  first.
+- **Entity and preset are not resolved from the content.** For a product
+  `Content`, `$content->entity` and `$content->preset` return **null**:
+  `$content->presettable` is a CMS `Presettable`, and the CMS `Entity` and
+  `Preset` scoping hides the Shop `products` rows. A product-specific accessor for
+  the Shop entity and preset comes with the storefront plan. Until then reach them
+  through `Shop\Models\Entity` / `Preset` or `DynamicContentsService`.
 - **Preset-version migrations must see extended contents.** The seam's global
   scope hides extended contents, so any preset-version migration that walks
   product contents has to go through `Content::withExtended()`.
@@ -281,13 +303,20 @@ ERP `Item`s (E7b).
 
 ## Routes
 
-| Surface | Prefix | Middleware | Name |
-|---------|--------|------------|------|
-| Web | `shops` | `auth`, `verified` | `shop.*` |
-| API | `v1/shops` | `auth:sanctum` | `shop.*` |
+The only HTTP surface today is the scaffold `ShopController` resource stub
+(`app/Http/Controllers`), not a catalog surface, and it exists only while the
+module is enabled. The effective paths and names, from
+`php artisan route:list --name=shop`:
 
-Both are the scaffold `ShopController` resource stub (`app/Http/Controllers`),
-not a catalog surface.
+| Surface | Path | Middleware | Name |
+|---------|------|------------|------|
+| Web | `app/shops` | `auth`, `verified` | `shop.shop.*` |
+| API | `api/v1/v1/shops` | `auth:sanctum` | `shop.api.shop.*` |
+
+The route files declare `shops` and `v1/shops`, but Core's `RouteServiceProvider`
+prefixes them (`app`, `api/v1`) and names them with the module prefix. The doubled `v1` on the API
+is a scaffold quirk: the Core provider adds `api/v1` and `routes/api.php` adds
+`v1` again.
 
 ## Configuration
 
