@@ -89,17 +89,20 @@ it('demotes a trashed sibling so a restore cannot bring back a second default', 
         ->and($trashed->fresh()->is_default)->toBeFalse();
 });
 
-it('keeps the current default when it is re-saved', function (): void {
+it('does not demote the real default when a stale default instance is re-saved', function (): void {
     $product = Product::factory()->create();
+    $stale = ProductVariant::factory()->default()->for($product)->create();
     $current = ProductVariant::factory()->default()->for($product)->create();
-    $sibling = ProductVariant::factory()->for($product)->create();
 
-    $current->refresh()->update(['attributes' => ['size' => 'XL']]);
-    $current->save();
+    // `$stale` was demoted in the database by `$current`, but still reads as the default in memory.
+    expect($stale->is_default)->toBeTrue();
 
-    expect($current->fresh()->is_default)->toBeTrue()
-        ->and($sibling->fresh()->is_default)->toBeFalse()
-        ->and($product->variants()->where('is_default', true)->count())->toBe(1);
+    $stale->update(['attributes' => ['size' => 'S']]);
+
+    expect($product->variants()->where('is_default', true)->count())->toBe(1)
+        ->and($current->fresh()->is_default)->toBeTrue()
+        ->and($stale->fresh()->is_default)->toBeFalse()
+        ->and($stale->fresh()->attributes)->toBe(['size' => 'S']);
 });
 
 it('leaves the existing default alone when a non-default variant is saved', function (): void {

@@ -97,8 +97,10 @@ final class ProductVariant extends Model
     protected static function booted(): void
     {
         self::saved(static function (self $variant): void {
-            if ($variant->is_default !== true
-                || ! ($variant->wasRecentlyCreated || $variant->wasChanged('is_default') || $variant->wasChanged('product_id'))) {
+            // `isDirty` still reflects this save inside `saved` (the original is synced afterwards).
+            // `wasRecentlyCreated` would not do: it stays true for the life of the instance, so a stale
+            // in-memory default re-saved later would demote whatever is the real default by then.
+            if ($variant->is_default !== true || ! $variant->isDirty(['is_default', 'product_id'])) {
                 return;
             }
 
