@@ -72,8 +72,10 @@ final class ProductVariant extends Model
     }
 
     /**
-     * The ERP items this variant is composed of, through the composition rows. A soft-deleted row is left
-     * out, exactly as it is from {@see self::items()}; use that relation to write rows.
+     * The live ERP items this variant is composed of, through the composition rows. This is the purchasable
+     * view: a soft-deleted (discontinued) item and a soft-deleted row are both left out. For the full
+     * composition use {@see self::items()}, where every row still resolves its item (possibly trashed) via
+     * {@see VariantItem::item()}; use that relation to write rows too.
      *
      * @return BelongsToMany<Item, $this>
      */

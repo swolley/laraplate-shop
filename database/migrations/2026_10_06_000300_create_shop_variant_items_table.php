@@ -25,8 +25,9 @@ return new class extends Migration
                 ->cascadeOnDelete();
             MigrateUtils::prefixIndex($table, 'variant_id');
 
-            // The ERP item is restricted, not cascaded: a bundle component must not silently vanish
-            // because its item was hard-deleted. The item's own soft lifecycle is not affected.
+            // The ERP item is restricted, not cascaded, and that guards only a HARD delete: a bundle
+            // component must not silently vanish because its item was force-deleted. A soft-deleted item
+            // stays referenced by its composition row on purpose, so the row keeps resolving the item.
             $table->foreignId('item_id')
                 ->constrained(ERPTables::Items->value, 'id', "{$table_name}_item_id_FK")
                 ->restrictOnDelete();
