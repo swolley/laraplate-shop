@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Modules\Shop\Models;
 
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Validation\Rule;
 use Modules\Core\Overrides\Model;
 use Modules\Shop\Database\Factories\ProductVariantFactory;
 use Modules\Shop\Enums\ShopTables;
@@ -15,7 +16,7 @@ use Override;
  * them is the default.
  *
  * It carries no `company_id` of its own: the tenant is derived from the {@see self::product()} (E23).
- * `attributes` holds the purchase-selection axis (size, colour, ...) as a label/projection only — never
+ * `attributes` holds the purchase-selection axis (size, colour, ...) as a label/projection only, never
  * a source of truth and not relational (E22).
  *
  * @property int $product_id
@@ -29,6 +30,14 @@ final class ProductVariant extends Model
      */
     #[Override]
     protected $table = ShopTables::ProductVariants->value;
+
+    /**
+     * @var array<string, mixed>
+     */
+    #[Override]
+    protected $attributes = [
+        'is_default' => false,
+    ];
 
     /**
      * @var list<string>
@@ -56,7 +65,7 @@ final class ProductVariant extends Model
     {
         $rules = parent::getRules();
         $rules['create'] = array_merge($rules['create'], [
-            'product_id' => ['required', 'integer', 'exists:' . ShopTables::Products->value . ',id'],
+            'product_id' => ['required', 'integer', Rule::exists(ShopTables::Products->value, 'id')->whereNull('deleted_at')],
             'is_default' => ['sometimes', 'boolean'],
             'attributes' => ['nullable', 'array'],
         ]);
@@ -65,31 +74,43 @@ final class ProductVariant extends Model
             'attributes' => ['nullable', 'array'],
         ]);
 
+        // A variant never changes parent. The validated payload is the whole attribute set (the key is
+        // always present), so the key is prohibited only when the write actually moves it.
+        if ($this->isDirty('product_id')) {
+            $rules['update']['product_id'] = ['prohibited'];
+        }
+
         return $rules;
     }
 
     /**
-     * Enforce a single default variant per product: when a variant is saved with `is_default = true`,
-     * every other variant of the same product — trashed ones included, so a later restore cannot bring
-     * back a second default — is reset to false. An existing variant whose flag did not change is left
-     * alone, so a plain re-save never demotes the current default.
+     * Enforce a single default variant per product: once a variant has been saved as the default, every
+     * other variant of the same product (trashed ones included, so a later restore cannot bring back a
+     * second default) is reset to false.
+     *
+     * It runs on `saved`, not `saving`: Core validates and authorizes in `creating`/`updating`, which
+     * fire after `saving`, so demoting earlier would wipe the current default when the write is then
+     * rejected. A save that did not touch the flag (a plain re-save, a non-default write) leaves the
+     * siblings alone. The bulk update fires no model events, so it cannot recurse.
      */
     #[Override]
     protected static function booted(): void
     {
-        self::saving(static function (self $variant): void {
-            if ($variant->is_default !== true || ($variant->exists && ! $variant->isDirty('is_default'))) {
+        self::saved(static function (self $variant): void {
+            if ($variant->is_default !== true
+                || ! ($variant->wasRecentlyCreated || $variant->wasChanged('is_default') || $variant->wasChanged('product_id'))) {
                 return;
             }
 
             $variant->newQueryWithoutScopes()
                 ->where('product_id', $variant->product_id)
-                ->when($variant->exists, static fn ($query) => $query->whereKeyNot($variant->getKey()))
+                ->whereKeyNot($variant->getKey())
                 ->where('is_default', true)
                 ->update(['is_default' => false]);
         });
     }
 
+    #[Override]
     protected static function newFactory(): ProductVariantFactory
     {
         return ProductVariantFactory::new();

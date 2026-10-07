@@ -17,11 +17,11 @@ return new class extends Migration
         Schema::create($table_name, function (Blueprint $table) use ($table_name): void {
             $table->id();
 
-            // E23: no company_id here — the variant derives its tenant from its product. The FK
+            // E23: no company_id here: the variant derives its tenant from its product. The FK
             // cascades so a hard-deleted product never leaves orphan variants; the soft lifecycle is
             // handled by the Core soft-delete trait.
             $table->foreignId('product_id')
-                ->constrained(ShopTables::Products->value, 'id', "{$table_name}_product_FK")
+                ->constrained(ShopTables::Products->value, 'id', "{$table_name}_product_id_FK")
                 ->cascadeOnDelete();
             MigrateUtils::prefixIndex($table, 'product_id');
 
@@ -29,7 +29,7 @@ return new class extends Migration
             // portable across the supported drivers).
             $table->boolean('is_default')->default(false);
 
-            // E22: the purchase-selection axis (size, colour, ...) as a label/projection only — never a
+            // E22: the purchase-selection axis (size, colour, ...) as a label/projection only, never a
             // source of truth and not relational.
             $table->json('attributes')->nullable();
 

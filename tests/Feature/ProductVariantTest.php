@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Validation\ValidationException;
 use Modules\Shop\Enums\ShopTables;
 use Modules\Shop\Models\Product;
 use Modules\Shop\Models\ProductVariant;
@@ -58,4 +59,79 @@ it('derives its company from the product and has no company_id column', function
 
     expect($variant->getAttributes())->not->toHaveKey('company_id')
         ->and($variant->product->company_id)->not->toBeNull();
+});
+
+it('leaves the prior default intact when a promotion is rejected', function (): void {
+    $product = Product::factory()->create();
+    $current = ProductVariant::factory()->default()->for($product)->create();
+    $candidate = ProductVariant::factory()->for($product)->create();
+
+    // Core validates in `updating`, after `saving`: a demotion run too early would leave no default.
+    expect(fn () => $candidate->update(['is_default' => true, 'attributes' => 'not-an-array']))
+        ->toThrow(ValidationException::class);
+
+    expect($product->variants()->where('is_default', true)->count())->toBe(1)
+        ->and($product->refresh()->defaultVariant->is($current))->toBeTrue()
+        ->and($candidate->fresh()->is_default)->toBeFalse();
+});
+
+it('demotes a trashed sibling so a restore cannot bring back a second default', function (): void {
+    $product = Product::factory()->create();
+    $trashed = ProductVariant::factory()->default()->for($product)->create();
+    $trashed->delete();
+
+    $current = ProductVariant::factory()->default()->for($product)->create();
+
+    ProductVariant::withTrashed()->findOrFail($trashed->getKey())->restore();
+
+    expect($product->variants()->where('is_default', true)->count())->toBe(1)
+        ->and($product->refresh()->defaultVariant->is($current))->toBeTrue()
+        ->and($trashed->fresh()->is_default)->toBeFalse();
+});
+
+it('keeps the current default when it is re-saved', function (): void {
+    $product = Product::factory()->create();
+    $current = ProductVariant::factory()->default()->for($product)->create();
+    $sibling = ProductVariant::factory()->for($product)->create();
+
+    $current->refresh()->update(['attributes' => ['size' => 'XL']]);
+    $current->save();
+
+    expect($current->fresh()->is_default)->toBeTrue()
+        ->and($sibling->fresh()->is_default)->toBeFalse()
+        ->and($product->variants()->where('is_default', true)->count())->toBe(1);
+});
+
+it('leaves the existing default alone when a non-default variant is saved', function (): void {
+    $product = Product::factory()->create();
+    $current = ProductVariant::factory()->default()->for($product)->create();
+    $sibling = ProductVariant::factory()->for($product)->create();
+
+    $sibling->update(['attributes' => ['size' => 'S']]);
+    ProductVariant::factory()->for($product)->create();
+
+    expect($current->fresh()->is_default)->toBeTrue()
+        ->and($product->variants()->where('is_default', true)->count())->toBe(1);
+});
+
+it('starts as a non-default variant', function (): void {
+    expect((new ProductVariant())->is_default)->toBeFalse();
+});
+
+it('never changes parent', function (): void {
+    $variant = ProductVariant::factory()->for(Product::factory()->create())->create();
+    $other_product = Product::factory()->create();
+
+    expect(fn () => $variant->update(['product_id' => $other_product->getKey()]))
+        ->toThrow(ValidationException::class);
+
+    expect($variant->fresh()->product_id)->not->toBe($other_product->getKey());
+});
+
+it('cannot be created under a trashed product', function (): void {
+    $product = Product::factory()->create();
+    $product->delete();
+
+    expect(fn () => ProductVariant::factory()->for($product)->create())
+        ->toThrow(ValidationException::class);
 });

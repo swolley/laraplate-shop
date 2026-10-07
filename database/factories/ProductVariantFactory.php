@@ -21,7 +21,7 @@ final class ProductVariantFactory extends Factory
     protected $model = ProductVariant::class;
 
     /**
-     * The variant that is the product's default (E23: it derives its company from the product).
+     * The variant that is the default of its product.
      */
     public function default(): static
     {
