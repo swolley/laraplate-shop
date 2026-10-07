@@ -1,0 +1,268 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Modules\Shop\Models;
+
+use Modules\CMS\Contracts\ExtendsContent;
+use Modules\CMS\Enums\CMSTables;
+use Modules\CMS\Models\Concerns\ExtendsContentTrait;
+use Modules\CMS\Models\Content;
+use Modules\Core\Overrides\Model;
+use Modules\Core\Search\Schema\FieldType;
+use Modules\ERP\Concerns\BelongsToCompany;
+use Modules\Shop\Database\Factories\ProductFactory;
+use Modules\Shop\Enums\ProductKind;
+use Modules\Shop\Enums\ShopTables;
+use Override;
+
+/**
+ * Catalog anchor: a commercial object in its own table that extends a CMS {@see Content} through the
+ * content-extension seam (E2, E4) and carries its tenant via ERP (E23). It is the first production
+ * consumer of the seam.
+ *
+ * The backing {@see Content} is transparently merged onto the product (E2a): content-owned attributes
+ * read and write as if native on the product, mirroring how CMS `Contributor` surfaces its `User`. The
+ * seam trait supplies the `content()` relation, the always-loaded `$with`, the temp holder and the
+ * first-save bridge; the magic getter/setter and the dirty-content save override below complete the
+ * merge. The ERP `Item` link is deliberately NOT merged — it is a later relation via the variant pivot.
+ *
+ * @property int|string|null $content_id
+ * @property ProductKind|null $kind
+ * @property bool $is_published_in_shop
+ * @property bool $featured
+ */
+final class Product extends Model implements ExtendsContent
+{
+    use BelongsToCompany;
+    use ExtendsContentTrait;
+
+    /**
+     * The stable morph alias CMS stores on `contents.extended_type` and resolves through the
+     * {@see \Modules\CMS\Services\ContentExtenderRegistry}.
+     */
+    public const string CONTENT_ALIAS = 'shop.product';
+
+    /**
+     * The product's own columns. Any other attribute key is content-owned and routed to the merged
+     * {@see Content} by {@see self::getAttribute()}/{@see self::setAttribute()} (E2a).
+     *
+     * @var list<string>
+     */
+    private const array OWN_COLUMNS = [
+        'id',
+        'company_id',
+        'content_id',
+        'kind',
+        'is_published_in_shop',
+        'featured',
+        'release_date',
+        'metadata',
+        'created_at',
+        'updated_at',
+        'deleted_at',
+        'is_deleted',
+    ];
+
+    /**
+     * @var string
+     */
+    #[Override]
+    protected $table = ShopTables::Products->value;
+
+    /**
+     * @var list<string>
+     */
+    #[Override]
+    protected $fillable = [
+        'content_id',
+        'kind',
+        'is_published_in_shop',
+        'featured',
+        'release_date',
+        'metadata',
+    ];
+
+    #[Override]
+    public function contentAlias(): string
+    {
+        return self::CONTENT_ALIAS;
+    }
+
+    /**
+     * The extender's own data merged into the content's search document under the nested `extension`.
+     *
+     * @return array<string, mixed>
+     */
+    #[Override]
+    public function searchableExtension(): array
+    {
+        return [
+            'kind' => $this->kind?->value,
+            'is_published_in_shop' => $this->is_published_in_shop,
+            'featured' => $this->featured,
+        ];
+    }
+
+    /**
+     * The mapping fragment CMS composes into the `contents` index under the nested `extension` object.
+     *
+     * @return array<string, mixed>
+     */
+    #[Override]
+    public function searchableExtensionMapping(): array
+    {
+        return [
+            'kind' => ['type' => FieldType::Keyword, 'filterable' => true],
+            'is_published_in_shop' => ['type' => FieldType::Boolean, 'filterable' => true],
+            'featured' => ['type' => FieldType::Boolean, 'filterable' => true],
+        ];
+    }
+
+    /**
+     * Read a content-owned attribute as if it were native on the product (E2a).
+     *
+     * @param  string  $key
+     */
+    #[Override]
+    public function getAttribute($key): mixed
+    {
+        if ($this->isNativeKey($key)) {
+            return parent::getAttribute($key);
+        }
+
+        $content = $this->mergedContent();
+
+        if ($content instanceof Content) {
+            return $content->getAttribute($key);
+        }
+
+        return parent::getAttribute($key);
+    }
+
+    /**
+     * Write a content-owned attribute through to the merged content (E2a).
+     *
+     * @param  string  $key
+     * @return $this
+     */
+    #[Override]
+    public function setAttribute($key, $value)
+    {
+        if ($this->isNativeKey($key)) {
+            parent::setAttribute($key, $value);
+
+            return $this;
+        }
+
+        $content = $this->mergedContent();
+
+        if ($content instanceof Content) {
+            $content->setAttribute($key, $value);
+
+            return $this;
+        }
+
+        parent::setAttribute($key, $value);
+
+        return $this;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    #[Override]
+    public function getRules(): array
+    {
+        $rules = parent::getRules();
+        $rules['create'] = array_merge($rules['create'], [
+            'content_id' => ['required', 'integer', 'exists:' . CMSTables::Contents->value . ',id'],
+            'kind' => ['required', 'string', ProductKind::validationRule()],
+            'is_published_in_shop' => ['sometimes', 'boolean'],
+            'featured' => ['sometimes', 'boolean'],
+            'release_date' => ['nullable', 'date'],
+            'metadata' => ['nullable', 'array'],
+        ]);
+        $rules['update'] = array_merge($rules['update'], [
+            'content_id' => ['sometimes', 'integer', 'exists:' . CMSTables::Contents->value . ',id'],
+            'kind' => ['sometimes', 'string', ProductKind::validationRule()],
+            'is_published_in_shop' => ['sometimes', 'boolean'],
+            'featured' => ['sometimes', 'boolean'],
+            'release_date' => ['nullable', 'date'],
+            'metadata' => ['nullable', 'array'],
+        ]);
+
+        return $rules;
+    }
+
+    /**
+     * Persist a merged content whose fields changed through the product root before the product is
+     * written (E2a). The seam trait's own `save()` already stages and persists a not-yet-linked
+     * content on the first save, so this only covers the later write-through path — mirroring how
+     * `Contributor` persists its dirty `User`.
+     */
+    protected static function booted(): void
+    {
+        self::saving(static function (self $product): void {
+            if ($product->tempContent !== null || ! $product->relationLoaded('content')) {
+                return;
+            }
+
+            $content = $product->getRelation('content');
+
+            if ($content instanceof Content && $content->isDirty()) {
+                $content->save();
+            }
+        });
+    }
+
+    protected static function newFactory(): ProductFactory
+    {
+        return ProductFactory::new();
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [
+            'kind' => ProductKind::class,
+            'is_published_in_shop' => 'boolean',
+            'featured' => 'boolean',
+            'release_date' => 'date',
+            'metadata' => 'array',
+        ];
+    }
+
+    /**
+     * Whether the key is one of the product's own attributes (column, accessor/mutator, relation or
+     * pivot) rather than a content-owned key routed to the merged content.
+     */
+    private function isNativeKey(string $key): bool
+    {
+        return $key === 'pivot'
+            || in_array($key, self::OWN_COLUMNS, true)
+            || array_key_exists($key, $this->attributes)
+            || $this->hasGetMutator($key)
+            || $this->hasAttributeMutator($key)
+            || method_exists($this, $key);
+    }
+
+    /**
+     * The merged content: the loaded relation when present, else the content staged for the first
+     * save. Never triggers a lazy load, so attribute access on an unretrieved product stays query-free.
+     */
+    private function mergedContent(): ?Content
+    {
+        if ($this->relationLoaded('content')) {
+            $loaded = $this->getRelation('content');
+
+            if ($loaded instanceof Content) {
+                return $loaded;
+            }
+        }
+
+        return $this->tempContent instanceof Content ? $this->tempContent : null;
+    }
+}
