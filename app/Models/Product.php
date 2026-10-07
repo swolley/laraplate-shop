@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Modules\Shop\Models;
 
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Modules\CMS\Contracts\ExtendsContent;
 use Modules\CMS\Enums\CMSTables;
 use Modules\CMS\Models\Concerns\ExtendsContentTrait;
@@ -95,6 +97,25 @@ final class Product extends Model implements ExtendsContent
     public function contentAlias(): string
     {
         return self::CONTENT_ALIAS;
+    }
+
+    /**
+     * @return HasMany<ProductVariant, $this>
+     */
+    public function variants(): HasMany
+    {
+        return $this->hasMany(ProductVariant::class);
+    }
+
+    /**
+     * The product's default variant: the single variant flagged `is_default`, kept unique per product
+     * by {@see ProductVariant}.
+     *
+     * @return HasOne<ProductVariant, $this>
+     */
+    public function defaultVariant(): HasOne
+    {
+        return $this->hasOne(ProductVariant::class)->where('is_default', true);
     }
 
     /**
