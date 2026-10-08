@@ -117,9 +117,13 @@ final class VariantItem extends Model
     }
 
     /**
-     * Refuse to restore a row when a different live row already composes the same variant with the same
-     * item. The create and item-swap rules keep that pair unique among live rows, but Core skips update
-     * validation when only `deleted_at` changes, so a restore would otherwise bring a duplicate back.
+     * Refuse two restores that would break the composition. A row under a trashed variant comes back only
+     * with the variant's own restore, which revives it in bulk and never runs this hook: restoring it
+     * directly would also let a duplicate slip in later, when the variant's restore revives a sibling
+     * that uses the same item. And refuse to restore a row when a different live row already composes
+     * the same variant with the same item: the create and item-swap rules keep that pair unique among
+     * live rows, but Core skips update validation when only `deleted_at` changes, so a restore would
+     * otherwise bring a duplicate back.
      *
      * @throws ValidationException
      */
@@ -127,6 +131,12 @@ final class VariantItem extends Model
     protected static function booted(): void
     {
         self::restoring(static function (self $row): void {
+            if ($row->variant()->onlyTrashed()->exists()) {
+                throw ValidationException::withMessages([
+                    'variant_id' => ['A composition row cannot be restored while its variant is trashed; restore the variant instead.'],
+                ]);
+            }
+
             $duplicate_exists = $row->newQuery()
                 ->where('variant_id', $row->variant_id)
                 ->where('item_id', $row->item_id)

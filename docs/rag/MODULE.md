@@ -10,12 +10,9 @@ variant, variant composition) and the seed of the product content entity. It has
 no stock, cart, checkout or payment behaviour, and no write, API or Filament
 surface yet (see «Not in this module yet»).
 
-The module is **not enabled** in the committed `modules_statuses.json`.
-Enablement is pending a small CMS test fix: enabling Shop registers `shop.product`
-as the first production content extender, and two CMS tests assume an empty
-extender registry. To use the module, add `"Shop": true` to
-`modules_statuses.json` locally. Until it is enabled, none of its routes,
-providers or migrations load.
+The module is enabled in the committed `modules_statuses.json`. Enabling it registers
+`shop.product` as the first production content extender in the CMS
+`ContentExtenderRegistry` (see «Seam registration»).
 
 ## Boundaries
 
@@ -188,17 +185,58 @@ Product and content are one unit with a symmetric lifecycle (E17):
   (`ContentExtensionCascade`) stops the two directions from looping.
 - A hard-deleted content cannot leave a bodiless product: the `content_id` FK
   cascades on delete.
-- Shop code does not cascade a product soft delete to its variants. Variants of a
-  trashed product are rejected on create (see below); a hard delete cascades at
-  the FK level (product to variants to variant items).
-- **Soft-deleting a product leaves its variants live and orphaned.**
-  `$product->delete()` trashes the content with it (E17) but does not touch the
-  `ProductVariant` rows: only a hard delete cascades, through the FK. A
-  soft-deleted product's variants therefore stay live and queryable, while
-  `$variant->product` resolves to null (the parent's soft-delete scope), so the
-  tenant derived from the product (E23) cannot be resolved for them. Any later
-  availability, cart or checkout query MUST constrain on a non-trashed product,
-  unless a later plan adds a soft-delete cascade from product to variants.
+
+The catalog subtree below the product follows the same lifecycle. The rules live in
+the `booted()` hooks of `Product`, `ProductVariant` and `VariantItem`:
+
+- **Soft delete cascades down.** Soft-deleting a `Product` soft-deletes its live
+  variants and their live items; soft-deleting a `ProductVariant` soft-deletes its
+  live items. No variant is left live under a trashed product, so `$variant->product`
+  and the tenant derived from it (E23) resolve for every live variant. The cascade
+  runs on the `deleted` event, after the parent row is written, and stamps every
+  cascaded row with the parent's own `deleted_at`.
+- **Restore is timestamp-matched.** Restoring a product revives only the variants
+  and items whose `deleted_at` equals the product's `deleted_at`, that is the rows
+  the cascade trashed. A child soft-deleted on its own earlier keeps its own
+  timestamp and stays trashed. Restoring a variant does the same for its items.
+- **Force delete is the foreign key's job.** `cascadeOnDelete` reaps the whole
+  subtree (product to variants to items); the hooks skip a force delete.
+- **A child is restored through its parent while the parent is trashed.**
+  Restoring a `ProductVariant` whose product is trashed, or a `VariantItem` whose
+  variant is trashed, throws a `ValidationException` (keys `product_id` and
+  `variant_id`). The parent's restore revives the children in bulk and does not run
+  that guard. Once the parent is live, a child that was removed on its own can be
+  restored by itself.
+- **A restore cannot recreate a duplicate pair.** Restoring a `VariantItem` throws a
+  `ValidationException` (key `item_id`) when a different live row already composes
+  the same variant with the same item. Together with the previous rule, a parent's
+  restore cannot revive a duplicate either: a trashed sibling cannot be restored
+  ahead of it.
+
+Developer notes on the cascade:
+
+- **Second precision.** `deleted_at` is stored with second precision. A child
+  soft-deleted on its own in the same wall-clock second as its parent's delete
+  carries the same timestamp, so the parent's restore revives it. The window is
+  narrow (scripts and tests, not a person using the UI) and there is no sub-second
+  column to close it.
+- **Bulk updates, no child events.** The cascade stamps and clears `deleted_at`
+  with bulk updates, so model events do not fire on the children: versioning,
+  approvals and search indexing do not see the cascade. It also runs only through
+  model `delete()` and `restore()` on the parent. A query-level
+  `Product::query()->delete()` (or any bulk soft delete) bypasses it entirely.
+- **Not transactional.** The cascade is not wrapped in a transaction with the
+  parent write, the same as the cascade to the content in `ExtendsContentTrait`. A
+  failure in the cascade leaves a trashed parent with live children.
+- **Re-deleting a trashed parent re-stamps it.** Calling `delete()` again on a stale
+  instance of an already trashed parent rewrites its `deleted_at`, so the children
+  cascaded earlier no longer match and stay trashed when the parent is restored.
+  Restore them one by one, parent first.
+- **Per-table soft-delete setting.** Core can switch soft deletes off per table. The
+  cascade writes `deleted_at` by bulk update and does not consult the child's
+  setting. A row deleted on a table with soft deletes off is removed for good, with
+  its subtree through the foreign keys, and the hooks skip it (no stamp to
+  propagate).
 
 ### Search
 
@@ -231,7 +269,8 @@ under a product.
 - A product can have **zero defaults** until one is set. A variant starts as
   non-default.
 - A variant never changes parent: `product_id` is prohibited on update when it
-  is dirty. A variant cannot be created under a trashed (or missing) product.
+  is dirty. A variant cannot be created under a trashed (or missing) product, nor
+  restored on its own while its product is trashed (see «Lifecycle»).
 - `Product::variants()` is the `hasMany`; `Product::defaultVariant()` is the
   `hasOne` filtered on `is_default`.
 
@@ -256,10 +295,11 @@ ERP `Item`s (E7b).
 - **Uniqueness** of `(variant_id, item_id)` among **live** rows is enforced by
   validation (a unique rule scoped to the variant and `deleted_at IS NULL`), not
   by a database index, so a soft-deleted row does not block re-adding the item.
-  The rule runs on create and on an item swap (only when the item changes). It is
-  **not** enforced on a restore: Core skips update validation when `deleted_at` is
-  dirty, so restoring a soft-deleted row after the same item was re-added creates
-  a duplicate live pair. This is a known gap, tracked as a minor.
+  The rule runs on create and on an item swap (only when the item changes). Core
+  skips update validation when only `deleted_at` changes, so a restore is guarded
+  separately: a `restoring` hook throws a `ValidationException` when a different live
+  row already composes the same variant with the same item. A row also cannot be
+  restored on its own while its variant is trashed (see «Lifecycle»).
 - A row never moves to another variant. `item_id` must exist and be live (not
   soft-deleted) when a row is created or its item is swapped. `variant_id` must
   exist and not be trashed.
@@ -290,8 +330,8 @@ ERP `Item`s (E7b).
 - Reviews, order and delivery read models, customer support through SAO.
 - Storefront classification: CMS categories, facets and per-category presets.
 - Any write, API or Filament surface: no Form Requests, API resources, policies
-  or domain actions for the catalog, and no seeded permissions. The only HTTP
-  surface is the scaffold stub below.
+  or domain actions for the catalog, and no seeded permissions. The module has no
+  HTTP surface yet (see «HTTP surface»).
 
 ## Developer caveats
 
@@ -319,22 +359,12 @@ ERP `Item`s (E7b).
   it a product, and `extended_type` is guarded: it is set only by the seam's
   create path.
 
-## Routes
+## HTTP surface
 
-The only HTTP surface today is the scaffold `ShopController` resource stub
-(`app/Http/Controllers`), not a catalog surface, and it exists only while the
-module is enabled. The effective paths and names, from
-`php artisan route:list --name=shop`:
-
-| Surface | Path | Middleware | Name |
-|---------|------|------------|------|
-| Web | `app/shops` | `auth`, `verified` | `shop.shop.*` |
-| API | `api/v1/v1/shops` | `auth:sanctum` | `shop.api.shop.*` |
-
-The route files declare `shops` and `v1/shops`, but Core's `RouteServiceProvider`
-prefixes them (`app`, `api/v1`) and names them with the module prefix. The doubled `v1` on the API
-is a scaffold quirk: the Core provider adds `api/v1` and `routes/api.php` adds
-`v1` again.
+This module has no HTTP surface yet: no routes, controllers, Form Requests or API
+resources. The generic `ShopController` scaffold was removed, `routes/web.php` and
+`routes/api.php` are empty, and `php artisan route:list --name=shop` returns
+nothing. The catalog's read and write surface comes with a later plan.
 
 ## Configuration
 

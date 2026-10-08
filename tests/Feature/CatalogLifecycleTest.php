@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use Illuminate\Validation\ValidationException;
+use Modules\ERP\Models\Item;
 use Modules\Shop\Enums\ProductKind;
 use Modules\Shop\Models\Product;
 use Modules\Shop\Models\ProductVariant;
@@ -80,6 +82,14 @@ it('does not resurrect a variant or row removed on its own before the product wa
         ->and(VariantItem::query()->whereKey($removed_variant_row->getKey())->exists())->toBeFalse()
         ->and(ProductVariant::withTrashed()->whereKey($removed->getKey())->exists())->toBeTrue()
         ->and(VariantItem::withTrashed()->whereKey($removed_variant_row->getKey())->exists())->toBeTrue();
+
+    // The independently removed variant restores on its own once its product is live, and brings back
+    // the row its own delete cascaded: the product cascade did not touch rows of an already trashed variant.
+    ProductVariant::withTrashed()->findOrFail($removed->getKey())->restore();
+
+    expect(ProductVariant::query()->whereKey($removed->getKey())->exists())->toBeTrue()
+        ->and(VariantItem::query()->whereKey($removed_variant_row->getKey())->exists())->toBeTrue()
+        ->and(VariantItem::query()->whereKey($removed_row->getKey())->exists())->toBeFalse();
 });
 
 it('soft-deleting a variant cascades to its rows and restoring it brings back only those', function (): void {
@@ -104,4 +114,46 @@ it('soft-deleting a variant cascades to its rows and restoring it brings back on
     expect(VariantItem::query()->where('variant_id', $variant->getKey())->pluck('id')->sort()->values()->all())
         ->toBe([$first->getKey(), $second->getKey()])
         ->and(VariantItem::query()->whereKey($removed->getKey())->exists())->toBeFalse();
+});
+
+it('refuses to restore a variant while its product is trashed', function (): void {
+    $product = Product::factory()->create(['kind' => ProductKind::Physical]);
+    $variant = ProductVariant::factory()->default()->for($product)->create();
+    $row = VariantItem::factory()->main()->for($variant, 'variant')->create();
+
+    $product->delete();
+
+    expect(fn () => ProductVariant::withTrashed()->findOrFail($variant->getKey())->restore())
+        ->toThrow(ValidationException::class);
+
+    expect(ProductVariant::query()->whereKey($variant->getKey())->exists())->toBeFalse()
+        ->and(ProductVariant::withTrashed()->whereKey($variant->getKey())->exists())->toBeTrue();
+
+    // The product's own restore is the way back, and it revives both levels.
+    Product::withTrashed()->findOrFail($product->getKey())->restore();
+
+    expect(ProductVariant::query()->whereKey($variant->getKey())->exists())->toBeTrue()
+        ->and(VariantItem::query()->whereKey($row->getKey())->exists())->toBeTrue();
+});
+
+it('refuses to restore a composition row while its variant is trashed, so a restore cannot recreate a duplicate', function (): void {
+    $variant = ProductVariant::factory()->for(Product::factory()->create(['kind' => ProductKind::Physical]))->create();
+    $item = Item::factory()->create();
+    $earlier = VariantItem::factory()->component()->for($variant, 'variant')->for($item, 'item')->create();
+    $earlier->delete();
+    $live = VariantItem::factory()->component()->for($variant, 'variant')->for($item, 'item')->create();
+
+    $this->travel(1)->minutes();
+    $variant->delete();
+
+    // The sibling is trashed with the variant, so without the parent check the duplicate guard would let
+    // this restore through and the variant's restore would then revive both rows.
+    expect(fn () => VariantItem::withTrashed()->findOrFail($earlier->getKey())->restore())
+        ->toThrow(ValidationException::class);
+
+    ProductVariant::withTrashed()->findOrFail($variant->getKey())->restore();
+
+    expect(VariantItem::query()->where('variant_id', $variant->getKey())->pluck('id')->all())->toBe([$live->getKey()])
+        ->and(fn () => VariantItem::withTrashed()->findOrFail($earlier->getKey())->restore())
+        ->toThrow(ValidationException::class);
 });

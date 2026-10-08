@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Modules\Core\Overrides\Model;
 use Modules\ERP\Models\Item;
 use Modules\Shop\Database\Factories\ProductVariantFactory;
@@ -127,7 +128,9 @@ final class ProductVariant extends Model
      * A soft delete cascades to the composition rows, stamping them with the variant's own `deleted_at`;
      * a restore revives only the rows that carry that exact stamp, so a row removed on its own earlier
      * stays removed. A force delete is left to the foreign key cascade. The cascade is a bulk update:
-     * it fires no model events on the rows.
+     * it fires no model events on the rows. A direct restore is refused while the product is trashed.
+     *
+     * @throws ValidationException
      */
     #[Override]
     protected static function booted(): void
@@ -144,6 +147,15 @@ final class ProductVariant extends Model
         });
 
         self::restoring(static function (self $variant): void {
+            // A variant under a trashed product comes back only with the product's own restore, which
+            // revives it in bulk and never runs this hook. A direct restore would leave a live variant
+            // under a trashed product.
+            if ($variant->product()->onlyTrashed()->exists()) {
+                throw ValidationException::withMessages([
+                    'product_id' => ['A variant cannot be restored while its product is trashed; restore the product instead.'],
+                ]);
+            }
+
             // `restoring` fires before the column is cleared, so the stamp of the delete is still there.
             $deleted_at = $variant->getRawOriginal('deleted_at');
 
