@@ -6,6 +6,7 @@ namespace Modules\Shop\Models;
 
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Modules\Core\Overrides\Model;
 use Modules\ERP\Enums\ERPTables;
 use Modules\ERP\Models\Item;
@@ -34,6 +35,7 @@ use Override;
  * @property int $item_id
  * @property numeric-string $quantity
  * @property string $role
+ * @property \Carbon\CarbonInterface|null $deleted_at
  */
 final class VariantItem extends Model
 {
@@ -112,6 +114,31 @@ final class VariantItem extends Model
         }
 
         return $rules;
+    }
+
+    /**
+     * Refuse to restore a row when a different live row already composes the same variant with the same
+     * item. The create and item-swap rules keep that pair unique among live rows, but Core skips update
+     * validation when only `deleted_at` changes, so a restore would otherwise bring a duplicate back.
+     *
+     * @throws ValidationException
+     */
+    #[Override]
+    protected static function booted(): void
+    {
+        self::restoring(static function (self $row): void {
+            $duplicate_exists = $row->newQuery()
+                ->where('variant_id', $row->variant_id)
+                ->where('item_id', $row->item_id)
+                ->whereKeyNot($row->getKey())
+                ->exists();
+
+            if ($duplicate_exists) {
+                throw ValidationException::withMessages([
+                    'item_id' => ['The variant already has a live composition row for this item.'],
+                ]);
+            }
+        });
     }
 
     #[Override]

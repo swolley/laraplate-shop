@@ -25,6 +25,7 @@ use Override;
  * @property int $product_id
  * @property bool $is_default
  * @property array<string, mixed>|null $attributes
+ * @property \Carbon\CarbonInterface|null $deleted_at
  */
 final class ProductVariant extends Model
 {
@@ -122,10 +123,37 @@ final class ProductVariant extends Model
      * fire after `saving`, so demoting earlier would wipe the current default when the write is then
      * rejected. A save that did not touch the flag (a plain re-save, a non-default write) leaves the
      * siblings alone. The bulk update fires no model events, so it cannot recurse.
+     *
+     * A soft delete cascades to the composition rows, stamping them with the variant's own `deleted_at`;
+     * a restore revives only the rows that carry that exact stamp, so a row removed on its own earlier
+     * stays removed. A force delete is left to the foreign key cascade. The cascade is a bulk update:
+     * it fires no model events on the rows.
      */
     #[Override]
     protected static function booted(): void
     {
+        self::deleted(static function (self $variant): void {
+            $deleted_at = $variant->getRawOriginal('deleted_at');
+
+            // Nothing to stamp on a force delete, or when soft deletes are off and the row was removed.
+            if ($variant->isForceDeleting() || $deleted_at === null) {
+                return;
+            }
+
+            $variant->items()->update(['deleted_at' => $deleted_at]);
+        });
+
+        self::restoring(static function (self $variant): void {
+            // `restoring` fires before the column is cleared, so the stamp of the delete is still there.
+            $deleted_at = $variant->getRawOriginal('deleted_at');
+
+            if ($deleted_at === null) {
+                return;
+            }
+
+            $variant->items()->onlyTrashed()->where('deleted_at', $deleted_at)->update(['deleted_at' => null]);
+        });
+
         self::saved(static function (self $variant): void {
             // `isDirty` still reflects this save inside `saved` (the original is synced afterwards).
             // `wasRecentlyCreated` would not do: it stays true for the life of the instance, so a stale

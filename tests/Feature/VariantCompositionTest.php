@@ -258,3 +258,35 @@ it('reaps the whole catalog subtree when a product is hard-deleted', function ()
         ->and(ProductVariant::withTrashed()->whereKey($other_variant->getKey())->exists())->toBeTrue()
         ->and(VariantItem::withTrashed()->whereKey($other_row->getKey())->exists())->toBeTrue();
 });
+
+it('refuses to restore a composition row when a live row already uses the same item on the variant', function (): void {
+    $variant = ProductVariant::factory()->for(Product::factory()->create(['kind' => ProductKind::Physical]))->create();
+    $item = Item::factory()->create();
+    $trashed = VariantItem::factory()->component()->for($variant, 'variant')->for($item, 'item')->create();
+    $trashed->delete();
+    $live = VariantItem::factory()->component()->for($variant, 'variant')->for($item, 'item')->create();
+
+    expect(fn () => VariantItem::withTrashed()->findOrFail($trashed->getKey())->restore())
+        ->toThrow(ValidationException::class);
+
+    expect(VariantItem::query()->where('variant_id', $variant->getKey())->where('item_id', $item->getKey())->pluck('id')->all())
+        ->toBe([$live->getKey()])
+        ->and(VariantItem::query()->whereKey($trashed->getKey())->exists())->toBeFalse()
+        ->and(VariantItem::withTrashed()->whereKey($trashed->getKey())->exists())->toBeTrue();
+});
+
+it('restores a composition row when no live row duplicates it', function (): void {
+    $variant = ProductVariant::factory()->for(Product::factory()->create(['kind' => ProductKind::Physical]))->create();
+    $item = Item::factory()->create();
+    $row = VariantItem::factory()->component()->for($variant, 'variant')->for($item, 'item')->create();
+    $row->delete();
+
+    // The same item on another variant, and another item on this variant, are not duplicates.
+    VariantItem::factory()->component()->for(ProductVariant::factory()->create(), 'variant')->for($item, 'item')->create();
+    VariantItem::factory()->component()->for($variant, 'variant')->create();
+
+    VariantItem::withTrashed()->findOrFail($row->getKey())->restore();
+
+    expect(VariantItem::query()->whereKey($row->getKey())->exists())->toBeTrue()
+        ->and($variant->refresh()->items)->toHaveCount(2);
+});

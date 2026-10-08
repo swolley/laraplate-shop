@@ -235,10 +235,50 @@ final class Product extends Model implements ExtendsContent
      * so {@see self::$contentDirtyViaMerge} carries that intent. The content is saved only when it
      * actually changed, never unconditionally, so a product save never spawns a spurious content
      * version or approval record.
+     *
+     * A soft delete also cascades down the catalog subtree, variants and their composition rows, so no
+     * variant is left live under a trashed product (E23). Both levels are stamped here with the product's
+     * own `deleted_at`: bulk updates fire no model events, so the variant hook would not run. A restore
+     * revives only the rows carrying that exact stamp, so a variant or row removed on its own earlier
+     * stays removed. A force delete is left to the foreign key cascade.
      */
     #[Override]
     protected static function booted(): void
     {
+        self::deleted(static function (self $product): void {
+            $deleted_at = $product->getRawOriginal('deleted_at');
+
+            // Nothing to stamp on a force delete, or when soft deletes are off and the row was removed.
+            if ($product->isForceDeleting() || $deleted_at === null) {
+                return;
+            }
+
+            // The rows go first: they are matched through their variants, which are still live here.
+            VariantItem::query()
+                ->whereIn('variant_id', $product->variants()->select('id'))
+                ->update(['deleted_at' => $deleted_at]);
+            $product->variants()->update(['deleted_at' => $deleted_at]);
+        });
+
+        self::restoring(static function (self $product): void {
+            // `restoring` fires before the column is cleared, so the stamp of the delete is still there.
+            $deleted_at = $product->getRawOriginal('deleted_at');
+
+            if ($deleted_at === null) {
+                return;
+            }
+
+            $variants = $product->variants()->onlyTrashed()->where('deleted_at', $deleted_at);
+
+            // The rows go first: they are matched through their variants, which are still trashed here.
+            VariantItem::query()
+                ->onlyTrashed()
+                ->where('deleted_at', $deleted_at)
+                ->whereIn('variant_id', (clone $variants)->select('id'))
+                ->update(['deleted_at' => null]);
+            $variants->update(['deleted_at' => null]);
+        });
+
         self::saving(static function (self $product): void {
             // The first save is the trait's job (the relation is not loaded yet and tempContent was
             // already cleared); drop the staging flag here without re-saving the content.
