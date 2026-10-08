@@ -17,9 +17,6 @@ use Modules\Shop\Models\Pivot\Presettable;
 use Modules\Shop\Models\Product;
 use Override;
 
-/**
- * @extends \Modules\Core\Overrides\Factory<\Modules\Shop\Models\Product>
- */
 final class ProductFactory extends Factory
 {
     /**
@@ -85,16 +82,15 @@ final class ProductFactory extends Factory
 
         $locale = LocaleContext::get();
 
-        if ($content->translations()->where('locale', $locale)->exists()) {
+        if ($content->hasTranslation($locale)) {
             return;
         }
 
         $title = fake()->unique()->sentence(3);
 
-        $content->translations()->create([
-            'locale' => $locale,
+        $content->setTranslation($locale, [
             'title' => $title,
-            'slug' => Str::slug($title) . '-' . $content->getKey(),
+            'slug' => Str::slug($title) . '-' . Str::lower(Str::random(8)),
         ]);
     }
 

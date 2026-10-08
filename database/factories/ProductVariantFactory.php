@@ -9,9 +9,6 @@ use Modules\Shop\Models\Product;
 use Modules\Shop\Models\ProductVariant;
 use Override;
 
-/**
- * @extends \Modules\Core\Overrides\Factory<\Modules\Shop\Models\ProductVariant>
- */
 final class ProductVariantFactory extends Factory
 {
     /**

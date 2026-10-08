@@ -9,6 +9,10 @@ use Modules\Shop\Models\Entity;
 use Modules\Shop\Models\Preset;
 use Override;
 
+/**
+ * @property int $entity_id
+ * @property int $id
+ */
 final class Presettable extends CorePresettable
 {
     #[Override]

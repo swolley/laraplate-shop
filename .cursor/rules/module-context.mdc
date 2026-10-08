@@ -12,7 +12,7 @@ alwaysApply: false
 - Shop orchestrate. Items and orders live in ERP, content in CMS, support in SAO. Do not clone their logic.
 - Dependency one-way: Shop know others, others know nothing of Shop.
 - Tables prefixed `shop_`.
-- Module still scaffold. Domain design not decided yet.
+- Catalog foundation shipped: Product extends CMS Content via the content-extension seam, ProductVariant, VariantItem composition from ERP items. Storefront, cart, checkout, payments, reviews not built yet (plan #2+).
 
 - Core change impact big. CMS/ERP/SAO change impact medium. Be careful.
 - If requirement unclear or risky: stop and ask user.

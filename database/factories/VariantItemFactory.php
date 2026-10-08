@@ -10,9 +10,6 @@ use Modules\Shop\Models\ProductVariant;
 use Modules\Shop\Models\VariantItem;
 use Override;
 
-/**
- * @extends \Modules\Core\Overrides\Factory<\Modules\Shop\Models\VariantItem>
- */
 final class VariantItemFactory extends Factory
 {
     /**

@@ -21,7 +21,7 @@
 -   [Description](#description)
 -   [Installation](#installation)
 -   [Configuration](#configuration)
--   [Current Bootstrap Status](#current-bootstrap-status)
+-   [Current Status](#current-status)
 -   [Roadmap](#roadmap)
 -   [Scripts](#scripts)
 -   [Contributing](#contributing)
@@ -32,7 +32,7 @@
 The Shop Module provides the online sales channel for Laraplate.
 It orchestrates CMS content, ERP items and SAO support into a storefront.
 
-At this stage, the module is intentionally initialized with a minimal structure to support incremental, test-driven development.
+The catalog foundation ships: a `Product` that extends a CMS `Content` through the content-extension seam (with a transparent content merge), `ProductVariant`s, and a `VariantItem` composition from ERP items. Storefront browsing, cart, checkout, payments, digital fulfilment and reviews are not built yet and arrive in later plans.
 
 ## Installation
 
@@ -86,14 +86,13 @@ Configuration file: `Modules/Shop/config/config.php`.
 
 > The module defines no environment variables yet. They will be added as domain features are introduced.
 
-## Current Bootstrap Status
+## Current Status
 
--   Module metadata (`module.json`) configured with provider registration
--   Service providers scaffolded (`ShopServiceProvider`, `RouteServiceProvider`, `EventServiceProvider`)
--   Base folders for HTTP, config, routes, resources, database, and tests in place
--   Composer package scaffolded with autoload mappings
+-   Module metadata (`module.json`) configured with provider registration; requires Core, CMS, ERP, SAO
+-   Service providers extend Core's `ModuleServiceProvider` (`ShopServiceProvider`, `RouteServiceProvider`, `EventServiceProvider`)
+-   Catalog foundation shipped: `Product` (content-extension seam consumer with transparent merge), `ProductVariant` (single default per product), `VariantItem` composition from ERP items, `ProductKind`, and the Shop-owned product content-entity seed
 -   Independent git repository registered as the `Modules/Shop` submodule
--   Not yet enabled in `modules_statuses.json`
+-   Enabled in `modules_statuses.json`; no HTTP surface yet (the generic scaffold controller was removed)
 
 ## Roadmap
 
