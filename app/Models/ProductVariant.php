@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
+use Modules\Core\Contracts\IsPartOfParent;
 use Modules\Core\Overrides\Model;
 use Modules\ERP\Models\Item;
 use Modules\Shop\Database\Factories\ProductVariantFactory;
@@ -28,7 +29,7 @@ use Override;
  * @property array<string, mixed>|null $attributes
  * @property \Carbon\CarbonInterface|null $deleted_at
  */
-final class ProductVariant extends Model
+final class ProductVariant extends Model implements IsPartOfParent
 {
     /**
      * @var string
@@ -53,6 +54,15 @@ final class ProductVariant extends Model
         'is_default',
         'attributes',
     ];
+
+    /**
+     * The relation to the record this one only exists inside, whose visibility it inherits.
+     */
+    #[Override]
+    public function parentRelation(): string
+    {
+        return 'product';
+    }
 
     /**
      * @return BelongsTo<Product, $this>

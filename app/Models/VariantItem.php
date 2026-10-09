@@ -7,6 +7,7 @@ namespace Modules\Shop\Models;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
+use Modules\Core\Contracts\IsPartOfParent;
 use Modules\Core\Overrides\Model;
 use Modules\ERP\Enums\ERPTables;
 use Modules\ERP\Models\Item;
@@ -37,7 +38,7 @@ use Override;
  * @property string $role
  * @property \Carbon\CarbonInterface|null $deleted_at
  */
-final class VariantItem extends Model
+final class VariantItem extends Model implements IsPartOfParent
 {
     public const string ROLE_MAIN = 'main';
 
@@ -59,6 +60,15 @@ final class VariantItem extends Model
         'quantity',
         'role',
     ];
+
+    /**
+     * The relation to the record this one only exists inside, whose visibility it inherits.
+     */
+    #[Override]
+    public function parentRelation(): string
+    {
+        return 'variant';
+    }
 
     /**
      * @return BelongsTo<ProductVariant, $this>
